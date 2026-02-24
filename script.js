@@ -24,6 +24,7 @@ let run = false;
 let stream = null;
 let slouchCounter = 0;
 let cooldown = false;
+let lastLog = 0;
 
 // MediaPipe Face Mesh Keypoints
 const KEYPOINT_NOSE_TIP = 1;
@@ -33,18 +34,28 @@ const KEYPOINT_RIGHT_EYE_INNER = 362;
 const KEYPOINT_RIGHT_EYE_OUTER = 263;
 
 async function setupCamera() {
+  console.log('Setting up camera...');
   stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
+  console.log('Stream acquired:', stream.id);
   video.srcObject = stream;
   await new Promise((r) => (video.onloadedmetadata = r));
+  console.log('Video metadata loaded. Dimensions:', video.videoWidth, 'x', video.videoHeight);
   video.play();
   overlay.width = video.videoWidth;
   overlay.height = video.videoHeight;
+  console.log('Overlay dimensions set:', overlay.width, 'x', overlay.height);
 }
 
 function drawDebug(keypoints) {
+  // Clear canvas for fresh draw
   ctx.clearRect(0, 0, overlay.width, overlay.height);
-  if (!keypoints) return;
   
+  if (!keypoints) {
+    console.warn('drawDebug called with no keypoints');
+    return;
+  }
+  
+  // Draw all keypoints in green
   ctx.fillStyle = 'lime';
   for (const p of keypoints) {
     ctx.beginPath();
@@ -52,37 +63,58 @@ function drawDebug(keypoints) {
     ctx.fill();
   }
   
-  // Highlight key features
+  // Highlight key features in red
   ctx.fillStyle = 'red';
-  [KEYPOINT_NOSE_TIP, KEYPOINT_LEFT_EYE_INNER, KEYPOINT_LEFT_EYE_OUTER, KEYPOINT_RIGHT_EYE_INNER, KEYPOINT_RIGHT_EYE_OUTER].forEach(idx => {
+  const importantIndices = [KEYPOINT_NOSE_TIP, KEYPOINT_LEFT_EYE_INNER, KEYPOINT_LEFT_EYE_OUTER, KEYPOINT_RIGHT_EYE_INNER, KEYPOINT_RIGHT_EYE_OUTER];
+  
+  importantIndices.forEach(idx => {
       const p = keypoints[idx];
       if(p) {
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
         ctx.fill();
       }
   });
 }
 
 async function runLoop() {
-  if (!run || !detector) return;
+  if (!run) return;
+  if (!detector) {
+    console.warn('Detector not ready yet');
+    requestAnimationFrame(runLoop);
+    return;
+  }
   
   try {
-    const faces = await detector.estimateFaces(video, { flipHorizontal: false }); // flipHorizontal handled by CSS or logic if needed, but standard is false for raw data
+    const now = Date.now();
+    // Log every 2 seconds to avoid spamming console
+    const shouldLog = (now - lastLog > 2000);
+
+    if (shouldLog) console.log('Running detection...');
     
-    // We want mirror effect for user, so usually we flip video with CSS and keypoints logic
-    // But estimateFaces has flipHorizontal option. If true, keypoints are flipped.
-    // Let's use flipHorizontal: false and just mirror the video element with CSS.
-    // Wait, drawing on canvas needs to match. If we flip video with CSS, we should flip context or inputs.
-    // Let's stick to standard: input not flipped, draw heavily.
-    // Actually, for user facing camera, flipHorizontal: true is better for the "mirror" feel in coordinates.
+    // Check video state
+    if (video.readyState < 2) {
+      if (shouldLog) console.log('Video not ready yet (readyState:', video.readyState, ')');
+      requestAnimationFrame(runLoop);
+      return;
+    }
+
+    const faces = await detector.estimateFaces(video, { flipHorizontal: false });
     
+    if (shouldLog) {
+       console.log(`Detected ${faces.length} faces.`);
+       lastLog = now;
+    }
+
     if (faces && faces.length > 0) {
       const face = faces[0];
       const keypoints = face.keypoints;
       
-      if (debugEl.checked) drawDebug(keypoints);
-      else ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (debugEl.checked) {
+          drawDebug(keypoints);
+      } else {
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+      }
 
       const nose = keypoints[KEYPOINT_NOSE_TIP];
       const leftEyeInner = keypoints[KEYPOINT_LEFT_EYE_INNER];
@@ -100,15 +132,6 @@ async function runLoop() {
 
         // Sensitivity logic
         const sens = Number(sensitivityEl.value);
-        // Map 1..100 to a threshold.
-        // Good posture: nose is roughly level with ears/eyes or slightly below.
-        // Slouching (head down): nose drops significantly below eyes.
-        // Or slouching (leaning forward): face gets larger?
-        // Usually "text neck" or slouching means head tilts down, so nose Y increases relative to eyes Y.
-        
-        // Threshold: 
-        // High sensitivity (100) -> small threshold (detects slight slouch)
-        // Low sensitivity (1) -> large threshold (only detects deep slouch)
         const minThresh = 0.05;
         const maxThresh = 0.25;
         const threshold = maxThresh - ((sens / 100) * (maxThresh - minThresh));
@@ -119,7 +142,8 @@ async function runLoop() {
           slouchCounter = Math.max(0, slouchCounter - 1);
         }
 
-        if (slouchCounter > 20 && !cooldown) { // Require sustained slouch (~0.5-1s)
+        if (slouchCounter > 20 && !cooldown) {
+            console.log('Slouch triggered! Count:', slouchCounter);
             try { 
                 await alertSound.play(); 
             } catch (e) { console.warn("Audio play failed", e); }
@@ -147,30 +171,34 @@ async function runLoop() {
       statusEl.style.color = "white";
     }
   } catch (err) {
-      console.error("Detection error:", err);
+      console.error("Detection error in runLoop:", err);
   }
   
   if(run) requestAnimationFrame(runLoop);
 }
 
 startBtn.addEventListener('click', async () => {
-  console.log('start button pressed');
+  console.log('Start button pressed');
   statusEl.textContent = 'Initializing…';
   startBtn.disabled = true;
   stopBtn.disabled = false;
   
   try {
+    console.log('Waiting for tf.ready()...');
     await tf.ready();
+    console.log('tf.ready() complete. Backend:', tf.getBackend());
+    
     await setupCamera();
     
-    // Create detector
+    console.log('Creating detector...');
     const model = faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh;
     const detectorConfig = {
-      runtime: 'tfjs',
+      runtime: 'tfjs', // specific runtime
       refineLandmarks: true,
       maxFaces: 1
     };
     detector = await faceLandmarksDetection.createDetector(model, detectorConfig);
+    console.log('Detector created successfully:', detector);
     
     statusEl.textContent = 'Monitoring...';
     statusEl.style.color = 'lime';
@@ -178,7 +206,7 @@ startBtn.addEventListener('click', async () => {
     requestAnimationFrame(runLoop);
     
   } catch (err) {
-    console.error('Initialization failed', err);
+    console.error('Initialization failed:', err);
     statusEl.textContent = `Error: ${err.message}`;
     startBtn.disabled = false;
     stopBtn.disabled = true;
@@ -186,6 +214,7 @@ startBtn.addEventListener('click', async () => {
 });
 
 stopBtn.addEventListener('click', () => {
+  console.log('Stop button pressed');
   run = false;
   startBtn.disabled = false;
   stopBtn.disabled = true;
@@ -195,6 +224,7 @@ stopBtn.addEventListener('click', () => {
   if (stream) {
     stream.getTracks().forEach(t => t.stop());
     stream = null;
+    console.log('Camera stream stopped');
   }
   ctx && ctx.clearRect(0,0,overlay.width,overlay.height);
 });
@@ -203,5 +233,6 @@ window.addEventListener('resize', () => {
   if (video.videoWidth) {
     overlay.width = video.videoWidth;
     overlay.height = video.videoHeight;
+    console.log('Resized overlay to:', overlay.width, 'x', overlay.height);
   }
 });
