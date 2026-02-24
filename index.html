@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PostureFAAAH — Local Slouch Detector</title>
-  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" href="favicon.ico" />
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <h1>PostureFAAAH</h1>
-  <p>Runs entirely in your browser. Camera + local ML. Plays a sound when you slouch.</p>
+  <p>Local posture monitoring with MediaPipe. Runs entirely in your browser. Plays a sound when you slouch. Works in the background.</p>
   <p id="status"></p>
 
   <div id="videoWrap">
@@ -25,13 +25,12 @@
   </div>
 
   <audio id="alertSound" preload="auto">
-    <source src="/sound/FAAAH.mp3" type="audio/mpeg">
-    <source src="/sound/FAAAH.m4a" type="audio/mp4">
+    <source src="sound/FAAAH.mp3" type="audio/mpeg">
+    <source src="sound/FAAAH.m4a" type="audio/mp4">
     Sorry, your browser does not support the audio element.
   </audio>
 
-  <!-- Load MediaPipe Face Mesh and Camera Utils -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <!-- Load MediaPipe Face Mesh -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
