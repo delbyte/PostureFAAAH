@@ -7,7 +7,8 @@ const canvasElement = document.getElementById('overlay');
 const canvasCtx = canvasElement.getContext('2d');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
-const sensitivityEl = document.getElementById('sensitivity');
+// sensitivity slider removed; we use a fixed value
+// const sensitivityEl = document.getElementById('sensitivity');
 const debugEl = document.getElementById('debug');
 const alertSound = document.getElementById('alertSound');
 const statusEl = document.getElementById('status');
@@ -74,9 +75,9 @@ function onResults(results) {
        const distance = nose.y - eyesMeanY; 
        // distance is relative to image height (0..1)
        
-       // Sensitivity logic
-       const sens = Number(sensitivityEl.value);
-       // Map 1..100 -> threshold
+       // Fixed sensitivity (80% of max dial)
+       const sens = 80; // value between 1 and 100
+       // Map to threshold the same way as before
        const minThresh = 0.05;
        const maxThresh = 0.25;
        const threshold = maxThresh - ((sens / 100) * (maxThresh - minThresh));
@@ -91,25 +92,25 @@ function onResults(results) {
            console.log("Slouch detected!", distance.toFixed(3), ">", threshold.toFixed(3));
            try { alertSound.play(); } catch(e){}
            cooldown = true;
-           statusEl.textContent = "CORRECTION REQUIRED";
-           statusEl.style.color = "#FF3030"; // Red
+           statusEl.textContent = "Upright, please!";
+           statusEl.style.color = "#FF3030"; // red warning
            setTimeout(() => { 
                cooldown = false; 
-               statusEl.textContent = "MONITORING // ACTIVE";
-               statusEl.style.color = "#4B5CFF"; // Accent
+               statusEl.textContent = "watching you...";
+               statusEl.style.color = "#4B5CFF"; // accent
            }, 3000);
            slouchCounter = 0;
        } else if (slouchCounter > 0) {
-           statusEl.textContent = `DEVIATION DETECTED... ${slouchCounter}`;
-           statusEl.style.color = "#F59E0B"; // Warning
+           statusEl.textContent = `hmm... ${slouchCounter}`;
+           statusEl.style.color = "#F59E0B"; // warning
        } else if (!cooldown) {
-           statusEl.textContent = "POSTURE // OPTIMAL";
-           statusEl.style.color = "#22C55E"; // Success
+           statusEl.textContent = "all good";
+           statusEl.style.color = "#22C55E"; // success
        }
     }
   } else {
-      statusEl.textContent = "NO SUBJECT DETECTED";
-      statusEl.style.color = "#A1A5B2"; // Secondary text
+      statusEl.textContent = "who dis?";
+      statusEl.style.color = "#A1A5B2"; // secondary
   }
   canvasCtx.restore();
 }
@@ -206,7 +207,7 @@ stopBtn.addEventListener('click', () => {
   
   startBtn.disabled = false;
   stopBtn.disabled = true;
-  statusEl.textContent = 'SYSTEM TERMINATED';
+  statusEl.textContent = 'stopped';
   statusEl.style.color = '#6B7280';
   canvasCtx.clearRect(0,0,canvasElement.width,canvasElement.height);
 });
