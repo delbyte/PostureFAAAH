@@ -17,7 +17,6 @@ let faceMesh = null;
 let slouchCounter = 0;
 let cooldown = false;
 let isRunning = false;
-let intervalId = null;
 let silentAudio = null; // Background audio hack
 
 // Keypoints indices
@@ -28,7 +27,7 @@ const RIGHT_EYE_INNER = 362;
 const RIGHT_EYE_OUTER = 263;
 
 function onResults(results) {
-  if (!isRunning) return;
+  if (!isRunning || !results) return;
 
   // Ensure canvas matches video dimensions
   if (videoElement.videoWidth && (canvasElement.width !== videoElement.videoWidth)) {
@@ -128,9 +127,25 @@ async function startCamera() {
     });
 }
 
+let isProcessing = false;
 async function processFrame() {
-    if (!isRunning || !faceMesh || !videoElement.videoWidth) return;
-    await faceMesh.send({image: videoElement});
+    if (!isRunning || !faceMesh) return;
+    
+    if (videoElement.readyState >= 3 && videoElement.videoWidth > 0 && !isProcessing) {
+        isProcessing = true;
+        try {
+            await faceMesh.send({image: videoElement});
+        } catch (err) {
+            console.error('faceMesh.send error:', err);
+        } finally {
+            isProcessing = false;
+        }
+    }
+    
+    // Schedule next frame
+    if (isRunning) {
+        setTimeout(processFrame, 100);
+    }
 }
 
 startBtn.addEventListener('click', async () => {
@@ -146,7 +161,7 @@ startBtn.addEventListener('click', async () => {
       
       faceMesh.setOptions({
         maxNumFaces: 1,
-        refineLandmarks: true,
+        refineLandmarks: false,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5
       });
@@ -173,9 +188,8 @@ startBtn.addEventListener('click', async () => {
       }
       silentAudio.play().catch(e => console.warn("Silent audio play failed", e));
       
-      // Use setInterval instead of requestAnimationFrame loop for background execution
-      // 100ms = 10 FPS
-      intervalId = setInterval(processFrame, 100);
+      // Start processing loop
+      processFrame();
       
   } catch (err) {
       console.error('Initialization failed:', err);
@@ -188,11 +202,6 @@ startBtn.addEventListener('click', async () => {
 stopBtn.addEventListener('click', () => {
   console.log('Stop button pressed');
   isRunning = false;
-  
-  if (intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
-  }
 
   if (silentAudio) {
       silentAudio.pause();
