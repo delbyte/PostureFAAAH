@@ -1,7 +1,3 @@
-// load TensorFlow.js (pinned to a recent stable release; you can bump to latest)
-import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js';
-// face-landmarks-detection @0.0.7 no longer exists on jsdelivr; use latest instead
-import * as faceLandmarksDetection from 'https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@latest/dist/face-landmarks-detection.min.js';
 
 console.log('script.js loaded, DOM state', document.readyState);
 window.addEventListener('error', (e) => {
@@ -23,14 +19,21 @@ const debugEl = document.getElementById('debug');
 const alertSound = document.getElementById('alertSound');
 const statusEl = document.getElementById('status');
 
-let model = null;
+let detector = null;
 let run = false;
 let stream = null;
 let slouchCounter = 0;
 let cooldown = false;
 
+// MediaPipe Face Mesh Keypoints
+const KEYPOINT_NOSE_TIP = 1;
+const KEYPOINT_LEFT_EYE_INNER = 33;
+const KEYPOINT_LEFT_EYE_OUTER = 133;
+const KEYPOINT_RIGHT_EYE_INNER = 362;
+const KEYPOINT_RIGHT_EYE_OUTER = 263;
+
 async function setupCamera() {
-  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
   video.srcObject = stream;
   await new Promise((r) => (video.onloadedmetadata = r));
   video.play();
@@ -38,64 +41,116 @@ async function setupCamera() {
   overlay.height = video.videoHeight;
 }
 
-function drawDebug(landmarks) {
+function drawDebug(keypoints) {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
-  if (!landmarks) return;
-  ctx.strokeStyle = 'lime';
-  ctx.lineWidth = 2;
-  for (const p of landmarks) {
+  if (!keypoints) return;
+  
+  ctx.fillStyle = 'lime';
+  for (const p of keypoints) {
     ctx.beginPath();
-    ctx.arc(p[0], p[1], 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,255,0,0.8)';
+    ctx.arc(p.x, p.y, 1, 0, Math.PI * 2);
     ctx.fill();
   }
-}
-
-function getPointMean(points) {
-  const m = points.reduce((acc, p) => { acc[0] += p[0]; acc[1] += p[1]; return acc; }, [0,0]);
-  return [m[0] / points.length, m[1] / points.length];
+  
+  // Highlight key features
+  ctx.fillStyle = 'red';
+  [KEYPOINT_NOSE_TIP, KEYPOINT_LEFT_EYE_INNER, KEYPOINT_LEFT_EYE_OUTER, KEYPOINT_RIGHT_EYE_INNER, KEYPOINT_RIGHT_EYE_OUTER].forEach(idx => {
+      const p = keypoints[idx];
+      if(p) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+  });
 }
 
 async function runLoop() {
-  if (!run) return;
-  const faces = await model.estimateFaces({ input: video, returnTensors: false, flipHorizontal: true });
-  if (faces && faces.length > 0) {
-    const f = faces[0];
-    const lm = f.scaledMesh || f.landmarks || [];
-    if (debugEl.checked) drawDebug(lm);
+  if (!run || !detector) return;
+  
+  try {
+    const faces = await detector.estimateFaces(video, { flipHorizontal: false }); // flipHorizontal handled by CSS or logic if needed, but standard is false for raw data
+    
+    // We want mirror effect for user, so usually we flip video with CSS and keypoints logic
+    // But estimateFaces has flipHorizontal option. If true, keypoints are flipped.
+    // Let's use flipHorizontal: false and just mirror the video element with CSS.
+    // Wait, drawing on canvas needs to match. If we flip video with CSS, we should flip context or inputs.
+    // Let's stick to standard: input not flipped, draw heavily.
+    // Actually, for user facing camera, flipHorizontal: true is better for the "mirror" feel in coordinates.
+    
+    if (faces && faces.length > 0) {
+      const face = faces[0];
+      const keypoints = face.keypoints;
+      
+      if (debugEl.checked) drawDebug(keypoints);
+      else ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-    // try to access annotated regions if available
-    const annotations = f.annotations || {};
-    const leftEye = annotations.leftEye || [];
-    const rightEye = annotations.rightEye || [];
-    const noseTip = annotations.noseTip || [];
+      const nose = keypoints[KEYPOINT_NOSE_TIP];
+      const leftEyeInner = keypoints[KEYPOINT_LEFT_EYE_INNER];
+      const leftEyeOuter = keypoints[KEYPOINT_LEFT_EYE_OUTER];
+      const rightEyeInner = keypoints[KEYPOINT_RIGHT_EYE_INNER];
+      const rightEyeOuter = keypoints[KEYPOINT_RIGHT_EYE_OUTER];
 
-    if (leftEye.length && rightEye.length && noseTip.length) {
-      const eyeCenter = getPointMean([...leftEye.slice(0,3), ...rightEye.slice(0,3)]);
-      const nose = getPointMean(noseTip.slice(0,3));
-      const dy = (nose[1] - eyeCenter[1]) / overlay.height; // normalized
+      if (nose && leftEyeInner && leftEyeOuter && rightEyeInner && rightEyeOuter) {
+        const leftEyeY = (leftEyeInner.y + leftEyeOuter.y) / 2;
+        const rightEyeY = (rightEyeInner.y + rightEyeOuter.y) / 2;
+        const eyesMeanY = (leftEyeY + rightEyeY) / 2;
+        
+        const distance = nose.y - eyesMeanY;
+        const normalizedDistance = distance / overlay.height;
 
-      // sensitivity slider: map value to threshold (lower threshold = easier to trigger)
-      const sens = Number(sensitivityEl.value); // 1..100
-      const threshold = 0.02 + (100 - sens) / 500; // approx 0.02..0.22
+        // Sensitivity logic
+        const sens = Number(sensitivityEl.value);
+        // Map 1..100 to a threshold.
+        // Good posture: nose is roughly level with ears/eyes or slightly below.
+        // Slouching (head down): nose drops significantly below eyes.
+        // Or slouching (leaning forward): face gets larger?
+        // Usually "text neck" or slouching means head tilts down, so nose Y increases relative to eyes Y.
+        
+        // Threshold: 
+        // High sensitivity (100) -> small threshold (detects slight slouch)
+        // Low sensitivity (1) -> large threshold (only detects deep slouch)
+        const minThresh = 0.05;
+        const maxThresh = 0.25;
+        const threshold = maxThresh - ((sens / 100) * (maxThresh - minThresh));
 
-      if (dy > threshold && !cooldown) {
-        slouchCounter++;
-      } else {
-        slouchCounter = Math.max(0, slouchCounter - 1);
+        if (normalizedDistance > threshold && !cooldown) {
+          slouchCounter++;
+        } else {
+          slouchCounter = Math.max(0, slouchCounter - 1);
+        }
+
+        if (slouchCounter > 20 && !cooldown) { // Require sustained slouch (~0.5-1s)
+            try { 
+                await alertSound.play(); 
+            } catch (e) { console.warn("Audio play failed", e); }
+            
+            cooldown = true;
+            statusEl.textContent = "Slouch detected!";
+            statusEl.style.color = "red";
+            setTimeout(() => { 
+                cooldown = false; 
+                statusEl.textContent = "Monitoring...";
+                statusEl.style.color = "lime";
+            }, 3000);
+            slouchCounter = 0;
+        } else if (slouchCounter > 0) {
+            statusEl.textContent = `Warning... ${slouchCounter}`;
+            statusEl.style.color = "orange";
+        } else if (!cooldown) {
+            statusEl.textContent = "Good posture";
+            statusEl.style.color = "lime";
+        }
       }
-
-      if (slouchCounter > 3 && !cooldown) {
-        try { await alertSound.play(); } catch (e) { /* play may fail if not allowed */ }
-        cooldown = true;
-        setTimeout(() => { cooldown = false; }, 4000);
-        slouchCounter = 0;
-      }
+    } else {
+      ctx.clearRect(0,0,overlay.width,overlay.height);
+      statusEl.textContent = "No face detected";
+      statusEl.style.color = "white";
     }
-  } else {
-    ctx.clearRect(0,0,overlay.width,overlay.height);
+  } catch (err) {
+      console.error("Detection error:", err);
   }
-  requestAnimationFrame(runLoop);
+  
+  if(run) requestAnimationFrame(runLoop);
 }
 
 startBtn.addEventListener('click', async () => {
@@ -103,42 +158,40 @@ startBtn.addEventListener('click', async () => {
   statusEl.textContent = 'Initializing…';
   startBtn.disabled = true;
   stopBtn.disabled = false;
+  
   try {
     await tf.ready();
-  } catch (err) {
-    console.error('tensorflow failed to load', err);
-    statusEl.textContent = 'Error loading TensorFlow.js';
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    return;
-  }
-  try {
     await setupCamera();
-  } catch (e) {
-    alert('Camera access denied or not available.');
-    statusEl.textContent = 'Camera error';
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    return;
-  }
-  try {
-    model = await faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh);
+    
+    // Create detector
+    const model = faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh;
+    const detectorConfig = {
+      runtime: 'tfjs',
+      refineLandmarks: true,
+      maxFaces: 1
+    };
+    detector = await faceLandmarksDetection.createDetector(model, detectorConfig);
+    
+    statusEl.textContent = 'Monitoring...';
+    statusEl.style.color = 'lime';
+    run = true;
+    requestAnimationFrame(runLoop);
+    
   } catch (err) {
-    console.error('model load failed', err);
-    statusEl.textContent = 'Error loading model';
+    console.error('Initialization failed', err);
+    statusEl.textContent = `Error: ${err.message}`;
     startBtn.disabled = false;
     stopBtn.disabled = true;
-    return;
   }
-  statusEl.textContent = '';
-  run = true;
-  requestAnimationFrame(runLoop);
 });
 
 stopBtn.addEventListener('click', () => {
   run = false;
   startBtn.disabled = false;
   stopBtn.disabled = true;
+  statusEl.textContent = 'Stopped';
+  statusEl.style.color = 'white';
+  
   if (stream) {
     stream.getTracks().forEach(t => t.stop());
     stream = null;
