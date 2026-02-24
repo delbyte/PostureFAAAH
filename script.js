@@ -87,7 +87,7 @@ function onResults(results) {
          slouchCounter = Math.max(0, slouchCounter - 1);
        }
 
-       if (slouchCounter > 20 && !cooldown) {
+       if (slouchCounter > 8 && !cooldown) {
            console.log("Slouch detected!", distance.toFixed(3), ">", threshold.toFixed(3));
            try { alertSound.play(); } catch(e){}
            cooldown = true;
