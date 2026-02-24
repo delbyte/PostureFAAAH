@@ -7,16 +7,18 @@ const canvasElement = document.getElementById('overlay');
 const canvasCtx = canvasElement.getContext('2d');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
-const sensitivityEl = document.getElementById('sensitivity');
+// sensitivity slider removed; we use a fixed value
+// const sensitivityEl = document.getElementById('sensitivity');
 const debugEl = document.getElementById('debug');
 const alertSound = document.getElementById('alertSound');
 const statusEl = document.getElementById('status');
 
-let camera = null;
 let faceMesh = null;
 let slouchCounter = 0;
 let cooldown = false;
 let isRunning = false;
+let intervalId = null;
+let silentAudio = null; // Background audio hack
 
 // Keypoints indices
 const NOSE_TIP = 1;
@@ -28,26 +30,34 @@ const RIGHT_EYE_OUTER = 263;
 function onResults(results) {
   if (!isRunning) return;
 
+  // Ensure canvas matches video dimensions
+  if (videoElement.videoWidth && (canvasElement.width !== videoElement.videoWidth)) {
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+  }
+
   canvasCtx.save();
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
   
-  // Draw video frame to canvas if needed, or just overlays. 
-  // Since video element is behind canvas, we just draw overlays.
+  // Draw debug points
+  if (debugEl.checked && results.multiFaceLandmarks) {
+    if (typeof drawConnectors === 'function' && typeof FACEMESH_TESSELATION !== 'undefined') {
+        for (const landmarks of results.multiFaceLandmarks) {
+            drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
+            drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, {color: '#FF3030'});
+            drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYEBROW, {color: '#FF3030'});
+            drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE, {color: '#30FF30'});
+            drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, {color: '#30FF30'});
+            drawConnectors(canvasCtx, landmarks, FACEMESH_FACE_OVAL, {color: '#E0E0E0'});
+            drawConnectors(canvasCtx, landmarks, FACEMESH_LIPS, {color: '#E0E0E0'});
+        }
+    } else {
+        console.warn('drawConnectors or FACEMESH constants not found');
+    }
+  }
   
   if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
     const landmarks = results.multiFaceLandmarks[0];
-    
-    // Draw debug points
-    if (debugEl.checked) {
-        // Draw mesh
-        drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
-        drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, {color: '#FF3030'});
-        drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYEBROW, {color: '#FF3030'});
-        drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE, {color: '#30FF30'});
-        drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, {color: '#30FF30'});
-        drawConnectors(canvasCtx, landmarks, FACEMESH_FACE_OVAL, {color: '#E0E0E0'});
-        drawConnectors(canvasCtx, landmarks, FACEMESH_LIPS, {color: '#E0E0E0'});
-    }
 
     // Extract keypoints
     const nose = landmarks[NOSE_TIP];
@@ -65,9 +75,9 @@ function onResults(results) {
        const distance = nose.y - eyesMeanY; 
        // distance is relative to image height (0..1)
        
-       // Sensitivity logic
-       const sens = Number(sensitivityEl.value);
-       // Map 1..100 -> threshold
+       // Fixed sensitivity (80% of max dial)
+       const sens = 80; // value between 1 and 100
+       // Map to threshold the same way as before
        const minThresh = 0.05;
        const maxThresh = 0.25;
        const threshold = maxThresh - ((sens / 100) * (maxThresh - minThresh));
@@ -82,27 +92,45 @@ function onResults(results) {
            console.log("Slouch detected!", distance.toFixed(3), ">", threshold.toFixed(3));
            try { alertSound.play(); } catch(e){}
            cooldown = true;
-           statusEl.textContent = "Slouch detected!";
-           statusEl.style.color = "red";
+           statusEl.textContent = "Upright, please!";
+           statusEl.style.color = "#FF3030"; // red warning
            setTimeout(() => { 
                cooldown = false; 
-               statusEl.textContent = "Monitoring...";
-               statusEl.style.color = "lime";
+               statusEl.textContent = "watching you...";
+               statusEl.style.color = "#4B5CFF"; // accent
            }, 3000);
            slouchCounter = 0;
        } else if (slouchCounter > 0) {
-           statusEl.textContent = `Warning... ${slouchCounter}`;
-           statusEl.style.color = "orange";
+           statusEl.textContent = `hmm... ${slouchCounter}`;
+           statusEl.style.color = "#F59E0B"; // warning
        } else if (!cooldown) {
-           statusEl.textContent = "Good posture";
-           statusEl.style.color = "lime";
+           statusEl.textContent = "all good";
+           statusEl.style.color = "#22C55E"; // success
        }
     }
   } else {
-      statusEl.textContent = "No face detected";
-      statusEl.style.color = "white";
+      statusEl.textContent = "who dis?";
+      statusEl.style.color = "#A1A5B2"; // secondary
   }
   canvasCtx.restore();
+}
+
+async function startCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user', width: 640, height: 480 }, 
+        audio: false 
+    });
+    videoElement.srcObject = stream;
+    return new Promise((resolve) => {
+        videoElement.onloadedmetadata = () => {
+            resolve();
+        };
+    });
+}
+
+async function processFrame() {
+    if (!isRunning || !faceMesh || !videoElement.videoWidth) return;
+    await faceMesh.send({image: videoElement});
 }
 
 startBtn.addEventListener('click', async () => {
@@ -113,7 +141,7 @@ startBtn.addEventListener('click', async () => {
   
   try {
       faceMesh = new FaceMesh({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`;
       }});
       
       faceMesh.setOptions({
@@ -125,30 +153,33 @@ startBtn.addEventListener('click', async () => {
       
       faceMesh.onResults(onResults);
       
-      camera = new Camera(videoElement, {
-        onFrame: async () => {
-          if (isRunning) await faceMesh.send({image: videoElement});
-        },
-        width: 640,
-        height: 480
-      });
-      
       console.log('Starting camera...');
-      await camera.start();
-      
-      isRunning = true;
-      statusEl.textContent = 'Monitoring...';
-      statusEl.style.color = 'lime';
-      
+      await startCamera();
+      await videoElement.play();
+
       // Sync overlay size
-      videoElement.addEventListener('loadedmetadata', () => {
-          canvasElement.width = videoElement.videoWidth;
-          canvasElement.height = videoElement.videoHeight;
-      });
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+      
+
+      isRunning = true;
+      statusEl.textContent = 'MONITORING // ACTIVE';
+      statusEl.style.color = '#4B5CFF';
+
+      // Silent audio hack to keep background tab alive
+      if (!silentAudio) {
+        silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
+        silentAudio.loop = true;
+      }
+      silentAudio.play().catch(e => console.warn("Silent audio play failed", e));
+      
+      // Use setInterval instead of requestAnimationFrame loop for background execution
+      // 100ms = 10 FPS
+      intervalId = setInterval(processFrame, 100);
       
   } catch (err) {
       console.error('Initialization failed:', err);
-      statusEl.textContent = `Error: ${err.message}`;
+      statusEl.textContent = `ERROR: ${err.message}`;
       startBtn.disabled = false;
       stopBtn.disabled = true;
   }
@@ -157,18 +188,26 @@ startBtn.addEventListener('click', async () => {
 stopBtn.addEventListener('click', () => {
   console.log('Stop button pressed');
   isRunning = false;
-  if (camera) {
-      camera.stop(); // Camera utility doesn't have stop(), but we stop processing
-      // Actually Camera utils start() returns promise, no explicit stop() method in some versions, 
-      // but usually we just stop calling send().
-      // Let's stop the tracks manually to be safe.
-      const stream = videoElement.srcObject;
-      if(stream) stream.getTracks().forEach(t => t.stop());
+  
+  if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+  }
+
+  if (silentAudio) {
+      silentAudio.pause();
+      silentAudio.currentTime = 0;
+  }
+  
+  const stream = videoElement.srcObject;
+  if(stream) {
+      stream.getTracks().forEach(t => t.stop());
       videoElement.srcObject = null;
   }
+  
   startBtn.disabled = false;
   stopBtn.disabled = true;
-  statusEl.textContent = 'Stopped';
-  statusEl.style.color = 'white';
+  statusEl.textContent = 'stopped';
+  statusEl.style.color = '#6B7280';
   canvasCtx.clearRect(0,0,canvasElement.width,canvasElement.height);
 });

@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PostureFAAAH — Local Slouch Detector</title>
-  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" href="favicon.ico" />
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>PostureFAAAH</h1>
-  <p>Runs entirely in your browser. Camera + local ML. Plays a sound when you slouch.</p>
-  <p id="status"></p>
+  <h1>Posture Faaah</h1>
+  <p>Yeah, it's that dumb. Sit up straight or hear a loud faah.</p>
+  <p id="status">System Idle</p>
 
   <div id="videoWrap">
     <video id="video" autoplay playsinline muted></video>
@@ -18,20 +18,22 @@
   </div>
 
   <div id="controls">
-    <button id="startBtn">Start</button>
-    <button id="stopBtn" disabled>Stop</button>
-    <label>Sensitivity <input id="sensitivity" type="range" min="1" max="100" value="40"></label>
-    <label><input id="debug" type="checkbox"> Debug overlay</label>
+    <button id="startBtn">START</button>
+    <button id="stopBtn" disabled>STOP</button>
+    <label><input id="debug" type="checkbox"> DEBUG OVERLAY</label>
   </div>
 
   <audio id="alertSound" preload="auto">
-    <source src="/sound/FAAAH.mp3" type="audio/mpeg">
-    <source src="/sound/FAAAH.m4a" type="audio/mp4">
+    <source src="sound/FAAAH.mp3" type="audio/mpeg">
+    <source src="sound/FAAAH.m4a" type="audio/mp4">
     Sorry, your browser does not support the audio element.
   </audio>
 
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.2/dist/face-landmarks-detection.min.js"></script>
+  <!-- Load MediaPipe Face Mesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6.1629159505/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+  
   <script type="module" src="script.js"></script>
 </body>
 </html>
