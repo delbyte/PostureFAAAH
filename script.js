@@ -87,25 +87,25 @@ function onResults(results) {
            console.log("Slouch detected!", distance.toFixed(3), ">", threshold.toFixed(3));
            try { alertSound.play(); } catch(e){}
            cooldown = true;
-           statusEl.textContent = "Slouch detected!";
-           statusEl.style.color = "red";
+           statusEl.textContent = "CORRECTION REQUIRED";
+           statusEl.style.color = "#FF3030"; // Red
            setTimeout(() => { 
                cooldown = false; 
-               statusEl.textContent = "Monitoring...";
-               statusEl.style.color = "lime";
+               statusEl.textContent = "MONITORING // ACTIVE";
+               statusEl.style.color = "#4B5CFF"; // Accent
            }, 3000);
            slouchCounter = 0;
        } else if (slouchCounter > 0) {
-           statusEl.textContent = `Warning... ${slouchCounter}`;
-           statusEl.style.color = "orange";
+           statusEl.textContent = `DEVIATION DETECTED... ${slouchCounter}`;
+           statusEl.style.color = "#F59E0B"; // Warning
        } else if (!cooldown) {
-           statusEl.textContent = "Good posture";
-           statusEl.style.color = "lime";
+           statusEl.textContent = "POSTURE // OPTIMAL";
+           statusEl.style.color = "#22C55E"; // Success
        }
     }
   } else {
-      statusEl.textContent = "No face detected";
-      statusEl.style.color = "white";
+      statusEl.textContent = "NO SUBJECT DETECTED";
+      statusEl.style.color = "#A1A5B2"; // Secondary text
   }
   canvasCtx.restore();
 }
@@ -156,9 +156,10 @@ startBtn.addEventListener('click', async () => {
       canvasElement.width = videoElement.videoWidth;
       canvasElement.height = videoElement.videoHeight;
       
+
       isRunning = true;
-      statusEl.textContent = 'Monitoring...';
-      statusEl.style.color = 'lime';
+      statusEl.textContent = 'MONITORING // ACTIVE';
+      statusEl.style.color = '#4B5CFF';
 
       // Silent audio hack to keep background tab alive
       if (!silentAudio) {
@@ -173,7 +174,7 @@ startBtn.addEventListener('click', async () => {
       
   } catch (err) {
       console.error('Initialization failed:', err);
-      statusEl.textContent = `Error: ${err.message}`;
+      statusEl.textContent = `ERROR: ${err.message}`;
       startBtn.disabled = false;
       stopBtn.disabled = true;
   }
@@ -201,7 +202,7 @@ stopBtn.addEventListener('click', () => {
   
   startBtn.disabled = false;
   stopBtn.disabled = true;
-  statusEl.textContent = 'Stopped';
-  statusEl.style.color = 'white';
+  statusEl.textContent = 'SYSTEM TERMINATED';
+  statusEl.style.color = '#6B7280';
   canvasCtx.clearRect(0,0,canvasElement.width,canvasElement.height);
 });
