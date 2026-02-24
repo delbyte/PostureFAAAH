@@ -1,5 +1,7 @@
+// load TensorFlow.js (pinned to a recent stable release; you can bump to latest)
 import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js';
-import * as faceLandmarksDetection from 'https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@0.0.7/dist/face-landmarks-detection.min.js';
+// face-landmarks-detection @0.0.7 no longer exists on jsdelivr; use latest instead
+import * as faceLandmarksDetection from 'https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@latest/dist/face-landmarks-detection.min.js';
 
 console.log('script.js loaded, DOM state', document.readyState);
 window.addEventListener('error', (e) => {
