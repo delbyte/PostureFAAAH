@@ -1,6 +1,16 @@
 import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js';
 import * as faceLandmarksDetection from 'https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@0.0.7/dist/face-landmarks-detection.min.js';
 
+console.log('script.js loaded, DOM state', document.readyState);
+window.addEventListener('error', (e) => {
+  console.error('global error', e.message, e.filename, e.lineno, e.colno, e.error);
+  if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('unhandled promise rejection', e.reason);
+  if (statusEl) statusEl.textContent = `Error: ${e.reason}`;
+});
+
 const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
 const ctx = overlay.getContext('2d');
@@ -9,6 +19,7 @@ const stopBtn = document.getElementById('stopBtn');
 const sensitivityEl = document.getElementById('sensitivity');
 const debugEl = document.getElementById('debug');
 const alertSound = document.getElementById('alertSound');
+const statusEl = document.getElementById('status');
 
 let model = null;
 let run = false;
@@ -86,18 +97,38 @@ async function runLoop() {
 }
 
 startBtn.addEventListener('click', async () => {
+  console.log('start button pressed');
+  statusEl.textContent = 'Initializing…';
   startBtn.disabled = true;
   stopBtn.disabled = false;
-  await tf.ready();
   try {
-    await setupCamera();
-  } catch (e) {
-    alert('Camera access denied or not available.');
+    await tf.ready();
+  } catch (err) {
+    console.error('tensorflow failed to load', err);
+    statusEl.textContent = 'Error loading TensorFlow.js';
     startBtn.disabled = false;
     stopBtn.disabled = true;
     return;
   }
-  model = await faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh);
+  try {
+    await setupCamera();
+  } catch (e) {
+    alert('Camera access denied or not available.');
+    statusEl.textContent = 'Camera error';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    return;
+  }
+  try {
+    model = await faceLandmarksDetection.load(faceLandmarksDetection.SupportedPackages.mediapipeFacemesh);
+  } catch (err) {
+    console.error('model load failed', err);
+    statusEl.textContent = 'Error loading model';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    return;
+  }
+  statusEl.textContent = '';
   run = true;
   requestAnimationFrame(runLoop);
 });
